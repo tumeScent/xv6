@@ -9,7 +9,7 @@
 #include "riscv.h"
 #include "defs.h"
 
-#define NSUPERPG 10
+#define NSUPERPG 20
 
 static char *super_pages[NSUPERPG];
 static int super_used[NSUPERPG];

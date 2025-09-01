@@ -5,6 +5,7 @@
 #include "user/user.h"
 
 #define N (8 * (1 << 20))
+#define N1 (3 * (1 << 12))
 
 void print_pgtbl();
 void print_kpgtbl();
@@ -121,6 +122,7 @@ superpg_test()
   testname = "superpg_test";
   
   char *end = sbrk(N);
+  // end = sbrk(N1);
   if (end == 0 || end == (char*)0xffffffffffffffff)
     err("sbrk failed");
   

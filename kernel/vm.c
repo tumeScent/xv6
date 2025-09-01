@@ -204,7 +204,6 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     for(;;){
       if((pte = walk_to_level(pagetable, a, 1, 1)) == 0)
         return -1;
-      printf("mapages(superpage): %p\n", (void*)pte);
       if(*pte & PTE_V)
         panic("mappages: superpage remap");
       *pte = PA2PTE(pa) | perm | PTE_V ;
@@ -254,12 +253,16 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0) {
-      printf("va=%ld pte=%ld\n", a, *pte);
-      panic("uvmunmap: not mapped");
+      a = SUPERPGROUNDUP(a);
+      if((pte = walk(pagetable, a, 0)) == 0)
+        panic("uvmunmap: walk");
+      if((*pte & PTE_V) == 0 || a >= end)
+        panic("uvmunmap: not mapped");
     }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
 
+    printf("pagetable=%p va=%p pte=%p\n",(void*)pagetable, (void*)a, (void *)pte);
     if((*pte & PTE_PS)){
       // superpage, no need to free the physical memory.
       sz = SUPERPGSIZE;
@@ -317,11 +320,18 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
   char *mem;
   uint64 a;
   int sz;
+  struct proc *p = myproc();
+  uint64 mapped = p->mapped_sz;
 
   if(newsz < oldsz)
     return oldsz;
 
   oldsz = PGROUNDUP(oldsz);
+  uint64 soldsz = oldsz;
+  if(newsz - oldsz >= SUPERPGSIZE){
+    mapped = SUPERPGROUNDUP(oldsz);
+    soldsz = mapped;
+  }
   uint64 bound = oldsz;
   int superflag = 0;
 
@@ -332,44 +342,43 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
       mem = superalloc();
       if(mem == 0){
         if(a > oldsz)
-          uvmunmap(pagetable, oldsz, (a-oldsz) / SUPERPGSIZE, 1);
+          uvmunmap(pagetable, soldsz, (mapped-soldsz) / SUPERPGSIZE, 1);
         return 0;
       }
       memset(mem, 0, SUPERPGSIZE);
       int nperm = PTE_PS|PTE_R|PTE_U|xperm;
-      printf("uvmalloc: nperm: %d\n", nperm);
-      if(mappages(pagetable, a, SUPERPGSIZE, (uint64)mem, nperm) != 0){
+      if(mappages(pagetable, mapped, SUPERPGSIZE, (uint64)mem, nperm) != 0){
         superfree(mem);
-        if(a > oldsz)
-          uvmunmap(pagetable, oldsz, (a-oldsz) / SUPERPGSIZE, 1);
+        if(mapped > soldsz)
+          uvmunmap(pagetable, soldsz, (mapped-soldsz) / SUPERPGSIZE, 1);
         return 0;
       }
-      printf("uvmalloc: pagetable: %p  va: %p  mem: %p\n", (void*) pagetable, (void*) a, (void*) mem);
-      pte_t * pte = walk(pagetable, a, 0);
-      printf("isleaf: %d PS: %d\n", (int)PTE_LEAF(*pte), (int)(*pte&PTE_PS));
+      printf("uvmalloc: pagetable: %p  va: %p  mem: %p\n", (void*) pagetable, (void*) mapped, (void*) mem);
     }
     else {
       if(bound == oldsz && superflag) bound = a;
+      if(!superflag && mapped != oldsz) mapped = a;
       sz = PGSIZE;
       mem = kalloc();
       if(mem == 0){
         uvmdealloc(pagetable, a, bound);
-        if(bound > oldsz) uvmunmap(pagetable, oldsz, (bound-oldsz) / SUPERPGSIZE, 1);
+        if(bound > soldsz) uvmunmap(pagetable, soldsz, (bound-soldsz) / SUPERPGSIZE, 1);
         return 0;
       }
 #ifndef LAB_SYSCALL
       memset(mem, 0, sz);
 #endif
-      if(mappages(pagetable, a, sz, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
+      if(mappages(pagetable, mapped, sz, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
         kfree(mem);
-        uvmdealloc(pagetable, a, bound);
-        if(bound > oldsz) uvmunmap(pagetable, oldsz, (bound-oldsz) / SUPERPGSIZE, 1);
+        uvmdealloc(pagetable, mapped, bound);
+        if(bound > soldsz) uvmunmap(pagetable, soldsz, (bound-soldsz) / SUPERPGSIZE, 1);
         return 0;
       }
-      if(superflag) printf("uvmalloc: pagetable: %p  va: %p  mem: %p \n", (void*) pagetable, (void*) a, (void*) mem);
+      if(superflag) printf("uvmalloc: pagetable: %p  va: %p  mem: %p \n", (void*) pagetable, (void*) mapped, (void*) mem);
     }
+    mapped += sz;
   }
-
+    p->mapped_sz = mapped;
     return newsz;
 }
 
@@ -435,28 +444,43 @@ int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
-  uint64 pa, i;
+  uint64 pa, i, index = 0;
+  // i means amount of scanned and cupied memory,
+  // index means va been copied each iteration.
+  // when there are jumps to small page address to superpage address, i != index
   uint flags;
   char *mem;
   int szinc;
   printf("uvmcopy: old: %p  new: %p  sz: %p \n", (void*)old, (void*)new, (void*) sz);
 
   for(i = 0; i < sz; i += szinc){
-    printf("uvmcopy: i: %p\n",(void*) i);
-    if((pte = walk(old, i, 0)) == 0)
+    if((pte = walk(old, index, 0)) == 0)
       panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+    if((*pte & PTE_V) == 0){
+      if(sz > SUPERPGSIZE){
+        // jump to superpage address
+        index = SUPERPGROUNDUP(i);
+        // if va not enough for superpage, then superpage is not the reason why page not present, so it should panic
+        if(index > MAXVA) panic("uvmcopy: page not present");
+        if((pte = walk(old, index, 0)) == 0)
+          panic("uvmcopy: pte shoud exist");
+        if((*pte & PTE_V) == 0)
+          panic("uvmcopy: page not present");
+      }
+    }
+    printf("uvmcopy: index: %p\n",(void*) index);
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if(flags & PTE_PS){
-      printf("uvmcopy: superpage\n");
       szinc = SUPERPGSIZE;
-      if((mem = superalloc()) == 0)
+      if((mem = superalloc()) == 0){
+        printf("superalloc() failed.\n");
         goto err_super;
+      }
       memmove(mem, (char*)pa, SUPERPGSIZE);
-      if(mappages(new, i, SUPERPGSIZE, (uint64)mem, flags) != 0){
+      if(mappages(new, index, SUPERPGSIZE, (uint64)mem, flags) != 0){
         superfree(mem);
+        printf("map superpage failed.\n");
         goto err_super;
       }
     } 
@@ -465,11 +489,12 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       if((mem = kalloc()) == 0)
         goto err;
       memmove(mem, (char*)pa, PGSIZE);
-      if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+      if(mappages(new, index, PGSIZE, (uint64)mem, flags) != 0){
         kfree(mem);
         goto err;
       }
     }
+    index += szinc;
   }
   return 0;
 
