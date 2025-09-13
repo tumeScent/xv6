@@ -83,8 +83,11 @@ usertrap(void)
     if( p && p->ticks > 0){
       p->ntick ++;
       if( p->ntick == p->ticks){
-        // memmove(&p->alarm_trapframe, p->trapframe, sizeof(struct trapframe));
-        p->trapframe->epc = (uint64)p->handler;
+        if( !p->in_alarm ){
+          *p->trapframe_alarm = *p->trapframe;
+          p->trapframe->epc = (uint64)p->handler;
+          p->in_alarm = 1;
+        }
         p->ntick = 0;
       }
     }

@@ -23,7 +23,11 @@ uint64 sys_sigalarm(void)
 }
 uint64 sys_sigreturn(void)
 {
-  return 0;
+  struct proc *p = myproc();
+  p->in_alarm = 0;
+  // restore epc and trapframe
+  *p->trapframe = *p->trapframe_alarm;
+  return p->trapframe->a0;
 }
 
 uint64

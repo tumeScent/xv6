@@ -109,4 +109,7 @@ struct proc {
   int ticks;
   void (*handler) ();
   int ntick;
+  bool in_alarm;
+  struct trapframe *trapframe_alarm;
+  // uint64 epc_alarm;
 };
