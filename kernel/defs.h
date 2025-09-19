@@ -9,6 +9,7 @@ struct sleeplock;
 struct stat;
 struct superblock;
 
+extern int ref_cnt[];
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
