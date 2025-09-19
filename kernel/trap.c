@@ -67,6 +67,43 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 15){
+    // store/AMO page fault
+    acquire(&p->lock);
+
+    uint64 va = PGROUNDDOWN(r_stval());
+    pagetable_t pagetable = p->pagetable;
+    pte_t *pte = walk( pagetable, va, 0);
+    if(pte == 0 || !(*pte|PTE_V)){
+      printf("usertrap: not mapped\n");
+      release(&p->lock);
+      setkilled(p);
+    }
+    uint flags = PTE_FLAGS(*pte);
+    if( flags & PTE_C && flags & PTE_CW ){
+      char* mem;
+      if((mem = kalloc()) == 0){
+        printf("usertrap: no enough free memory\n");
+        release(&p->lock);
+        setkilled(p);
+      }
+      uint64 pa = PTE2PA(*pte);
+      memmove(mem, (char*)pa ,PGSIZE);
+      flags = flags | PTE_W;
+      pte_t npte = PA2PTE(mem) | flags;
+      *pte = npte;
+      // decrease ref_cnt on shared page
+      kfree((void*)pa);
+    } else {
+      // it's not originally writable before it become COW page
+      printf("usertrap(): store page fault pid=%d\n", p->pid);
+      printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
+      release(&p->lock);
+      setkilled(p);
+    }
+    sfence_vma();
+    release(&p->lock);
+
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
