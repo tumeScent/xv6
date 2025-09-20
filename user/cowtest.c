@@ -186,6 +186,7 @@ forkforktest()
   printf("forkfork: ");
 
   int sz = 256 * 4096;
+  // int sz = 4 * 4096;
   char *p = sbrk(sz);
   memset(p, 27, sz);
 

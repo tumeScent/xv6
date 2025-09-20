@@ -75,7 +75,7 @@ usertrap(void)
     pagetable_t pagetable = p->pagetable;
     pte_t *pte = walk( pagetable, va, 0);
     int badflag = 0;
-    if(pte == 0 || !(*pte|PTE_V)){
+    if(pte == 0 || !(*pte&PTE_V)){
       printf("usertrap: not mapped\n");
       badflag = 1;
       goto bad;

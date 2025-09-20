@@ -59,12 +59,15 @@ kfree(void *pa)
   r = (struct run*)pa;
 
   uint64 ind = PGROUNDDOWN( (uint64)r ) / PGSIZE;
+  acquire(&kmem.lock);
   if( ref_cnt[ind] > 1) {
     ref_cnt[ind] -- ;
+    release(&kmem.lock);
   }
   else {
+    ref_cnt[ind] = 0;
+    release(&kmem.lock);
     memset(pa, 1, PGSIZE);
-    ref_cnt[ind] --;
     acquire(&kmem.lock);
     r->next = kmem.freelist;
     kmem.freelist = r;
@@ -88,7 +91,9 @@ kalloc(void)
 
   if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
+    acquire(&kmem.lock);
     ref_cnt[PGROUNDDOWN( (uint64)r ) / PGSIZE] = 1;
+    release(&kmem.lock);
   }
     
   return (void*)r;

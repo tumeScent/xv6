@@ -5,6 +5,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
 
 /*
  * the kernel's page table.
@@ -324,18 +325,22 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     // COW
-    uint64 writable = (*pte & PTE_W) || (*pte & PTE_C && *pte &PTE_CW);
+    uint64 writable = (*pte & PTE_W);
     if( writable ){
       *pte = *pte | PTE_C; 
       *pte = *pte & (~PTE_W);
       *pte = *pte | PTE_CW;
+      // *pte = *pte | PTE_R;
     }
     flags = PTE_FLAGS(*pte);
     if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
     uint64 ind = PGROUNDDOWN(pa) / PGSIZE;
+    // struct spinlock ref_lock;
+    // acquire(&ref_lock);
     ref_cnt[ind] ++;
+    // release(&ref_lock);
 
     // if((mem = kalloc()) == 0)
     //   goto err;
@@ -379,17 +384,22 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     if(va0 >= MAXVA)
       return -1;
     pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0){
+    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ){
+        return -1;
+    }
+    if((*pte & PTE_W) == 0){
       if( *pte & PTE_C && *pte & PTE_CW){
+        // printf("copyout: copying %ld to dstva: %ld\n", len, dstva);
         char* mem;
         if((mem = kalloc()) == 0){
           printf("copyout: no enough free memory\n");
           return -1;
         }
         uint64 pa = PTE2PA(*pte);
+        memmove(mem, (char*)pa, PGSIZE);
         uint flags = (PTE_FLAGS(*pte) | PTE_W) & (~PTE_C) & (~PTE_CW);
         *pte = PA2PTE(mem) | flags;
+        sfence_vma();
         kfree((void*)pa);
 
       }
