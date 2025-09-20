@@ -26,6 +26,13 @@ struct {
   struct run *freelist;
 } kmem;
 
+void ref_page_inc(uint64 pa){
+  uint64 ind = PGROUNDDOWN(pa) / PGSIZE;
+  acquire(&kmem.lock);
+  ref_cnt[ind]++;
+  release(&kmem.lock);
+}
+
 void
 kinit()
 {

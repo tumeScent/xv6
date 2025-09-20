@@ -317,6 +317,10 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uint64 pa, i;
   uint flags;
   // char *mem;
+  if( sz >= MAXVA ){
+    printf("uvmcopy: sz >= MAXVA\n");
+    return -1;
+  }
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -336,11 +340,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
-    uint64 ind = PGROUNDDOWN(pa) / PGSIZE;
-    // struct spinlock ref_lock;
-    // acquire(&ref_lock);
-    ref_cnt[ind] ++;
-    // release(&ref_lock);
+    ref_page_inc(pa);
 
     // if((mem = kalloc()) == 0)
     //   goto err;

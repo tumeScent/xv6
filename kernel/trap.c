@@ -72,21 +72,29 @@ usertrap(void)
     acquire(&p->lock);
 
     uint64 va = PGROUNDDOWN(r_stval());
+    if( va >= MAXVA ){
+      printf("usertrap: va >= MAXVA\n");
+      release(&p->lock);
+      setkilled(p);
+      exit(-1);
+    }
     pagetable_t pagetable = p->pagetable;
     pte_t *pte = walk( pagetable, va, 0);
-    int badflag = 0;
+    // int badflag = 0;
     if(pte == 0 || !(*pte&PTE_V)){
       printf("usertrap: not mapped\n");
-      badflag = 1;
-      goto bad;
+      release(&p->lock);
+      setkilled(p);
+      exit(-1);
     }
     uint flags = PTE_FLAGS(*pte);
     if( flags & PTE_C && flags & PTE_CW ){
       char* mem;
       if((mem = kalloc()) == 0){
         printf("usertrap: no enough free memory\n");
-        badflag = 1;
-        goto bad;
+        release(&p->lock);
+        setkilled(p);
+        exit(-1);
       }
       uint64 pa = PTE2PA(*pte);
       memmove(mem, (char*)pa ,PGSIZE);
@@ -99,17 +107,12 @@ usertrap(void)
       // it's not originally writable before it become COW page
       printf("usertrap(): store page fault pid=%d\n", p->pid);
       printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
-      badflag = 1;
-      goto bad;
+      release(&p->lock);
+      setkilled(p);
+      exit(-1);
     }
     sfence_vma();
     release(&p->lock);
-
-    if(badflag){
-bad:
-      release(&p->lock);
-      setkilled(p);
-    }
 
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
