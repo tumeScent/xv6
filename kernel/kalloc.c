@@ -15,7 +15,7 @@ void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
-int ref_cnt[num_pages];
+int ref_cnt[num_pages] = {};
 
 struct run {
   struct run *next;
@@ -65,8 +65,8 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  uint64 ind = PGROUNDDOWN( (uint64)r ) / PGSIZE;
   acquire(&kmem.lock);
+  uint64 ind = PGROUNDDOWN((uint64)pa) / PGSIZE;
   if( ref_cnt[ind] > 1) {
     ref_cnt[ind] -- ;
     release(&kmem.lock);

@@ -336,8 +336,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       *pte = *pte | PTE_CW;
       // *pte = *pte | PTE_R;
     }
-    flags = PTE_FLAGS(*pte);
-    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+   if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
     ref_page_inc(pa);

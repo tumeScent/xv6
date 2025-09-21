@@ -8,6 +8,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+extern int ref_cnt[];
 
 extern int ref_cnt[];
 // bio.c
