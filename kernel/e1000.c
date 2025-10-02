@@ -101,7 +101,25 @@ e1000_transmit(char *buf, int len)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after send completes.
   //
+  // printf("%d %d\n", len, strlen(buf));
+  uint32 tdt = regs[E1000_TDT];
+  
+  if( ! (tx_ring[tdt].status & E1000_TXD_STAT_DD) ){
+    printf("e1000_transmit: tx_ring overflowing\n");
+    return -1;
+  }
 
+  if( tx_bufs[tdt] != 0 ){
+    kfree( tx_bufs[tdt] );
+    tx_bufs[tdt] = 0;
+  }
+
+  tx_bufs[tdt] = buf;
+  tx_ring[tdt].addr = (uint64)buf;
+  tx_ring[tdt].length = len;
+  tx_ring[tdt].cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+  tx_ring[tdt].status = 0;
+  regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
   
   return 0;
 }
@@ -115,6 +133,7 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver a buf for each packet (using net_rx()).
   //
+  printf("e1000_recv\n");
 
 }
 
