@@ -134,6 +134,22 @@ e1000_recv(void)
   // Create and deliver a buf for each packet (using net_rx()).
   //
   printf("e1000_recv\n");
+  for(;;){
+    uint32 rdt = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+    if( !(rx_ring[rdt].status & E1000_RXD_STAT_DD)){
+      // printf("e1000_recv: rx_ring overflowing\n");
+      break;
+    }
+    net_rx( rx_bufs[rdt], rx_ring[rdt].length );
+    rx_bufs[rdt] = kalloc();
+    if(!rx_bufs[rdt])
+      panic("e1000");
+    rx_bufs[rdt] = 0;
+    rx_ring[rdt].status = 0;
+    rx_ring[rdt].addr = (uint64) rx_bufs[rdt];
+    regs[E1000_RDT] = rdt;
+  }
+  return;
 
 }
 
