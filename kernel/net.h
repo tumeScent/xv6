@@ -125,3 +125,23 @@ struct dns_data {
   uint32 ttl;
   uint16 len;
 } __attribute__((packed));
+
+#define NUDPPORT 16
+#define PKTQ_SIZE 16
+struct packet {
+  char* buf;
+  uint32 src_ip;
+  uint16 src_port;
+  int len;
+};
+struct packet_queue {
+  int head;
+  int tail;
+  struct packet *pkts[PKTQ_SIZE];
+};
+struct bound_port {
+  int used;
+  int port;
+  struct packet_queue q;
+};
+struct bound_port ports[NUDPPORT];

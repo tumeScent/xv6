@@ -36,7 +36,27 @@ sys_bind(void)
 {
   //
   // Your code here.
-  //
+  int port;
+  argint(0, &port);
+  if( port < 0 || port > 65535 ) return -1;
+  acquire(&netlock);
+  for (int i = 0;i < NUDPPORT;i ++){
+    if( ports[i].used && ports[i].port == port){
+      release(&netlock);
+      return -1;
+    }
+  }
+  for (int i = 0;i < NUDPPORT;i ++){
+    if( !ports[i].used ){
+      ports[i].used = 1;
+      ports[i].port = port;
+      ports[i].q.head = 0;
+      ports[i].q.tail = 0;
+      release(&netlock);
+      return 0;
+    }
+  }
+  release(&netlock);
 
   return -1;
 }
@@ -77,6 +97,51 @@ sys_recv(void)
   //
   // Your code here.
   //
+  struct proc *p = myproc();
+  int dport;
+  uint64 src;
+  uint64 sport;
+  uint64 buf;
+  int maxlen;
+
+  argint(0, &dport);
+  argaddr(1, &src);
+  argaddr(2, &sport);
+  argaddr(3, &buf);
+  argint(4, &maxlen);
+  if( dport < 0 || dport > 65535 ) return -1;
+  acquire(&netlock);
+  for( int i = 0;i < NUDPPORT;i ++ ){
+    if( ports[i].used && ports[i].port == dport ){
+      while( ports[i].q.head == ports[i].q.tail ){
+        sleep(&ports[i], &netlock);
+      }
+      struct packet *pkt = ports[i].q.pkts[ports[i].q.head];
+      ports[i].q.head = (ports[i].q.head + 1) % PKTQ_SIZE;
+      int len = pkt->len;
+      if( len > maxlen ) len = maxlen;
+      if( copyout(p->pagetable, buf, pkt->buf, len) < 0 ){
+        kfree(pkt->buf);
+        kfree(pkt);
+        return -1;
+      }
+      if( copyout(p->pagetable, src, (char*)&pkt->src_ip, sizeof(uint32)) < 0 ){
+        kfree(pkt->buf);
+        kfree(pkt);
+        return -1;
+      }
+      if( copyout(p->pagetable, sport, (char*)&pkt->src_port, sizeof(uint16)) < 0 ){
+        kfree(pkt->buf);
+        kfree(pkt);
+        return -1;
+      }
+      kfree(pkt->buf);
+      kfree(pkt);
+      release(&netlock);
+      return len;
+    }
+  }
+  release(&netlock);
   return -1;
 }
 
@@ -191,6 +256,62 @@ ip_rx(char *buf, int len)
   //
   // Your code here.
   //
+  if( len < sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp) ){
+    kfree(buf);
+    return;
+  }
+  struct eth *eth = (struct eth*) buf;
+  struct ip *ip = (struct ip*) (eth + 1);
+  struct udp *udp = (struct udp*) (ip + 1);
+
+  if( ip->ip_p != IPPROTO_UDP ) {
+    kfree(buf);
+    return;
+  }
+  if( ntohl(ip->ip_dst) != local_ip ) {
+    kfree(buf);
+    return;
+  }
+  int dport = ntohs(udp->dport);
+  acquire(&netlock);
+  for( int i = 0;i < NUDPPORT;i ++ ){
+    if( ports[i].used && ports[i].port == dport ){
+      if( (ports[i].q.tail + 1) % PKTQ_SIZE == ports[i].q.head ){
+        // queue full
+        kfree(buf);
+        release(&netlock);
+        return;
+      }
+      struct packet *pkt = (struct packet*) kalloc();
+      if( pkt == 0 ){
+        kfree(buf);
+        release(&netlock);
+        return;
+      }
+      memset(pkt, 0, sizeof(*pkt));
+      pkt->len = ntohs(udp->ulen) - sizeof(struct udp);
+      pkt->buf = kalloc();
+      if( pkt->buf == 0 ){
+        kfree(pkt);
+        kfree(buf);
+        release(&netlock);
+        return;
+      }
+      memmove(pkt->buf, (char *)(udp + 1), pkt->len);
+      pkt->src_ip = ntohl(ip->ip_src);
+      pkt->src_port = ntohs(udp->sport);
+      ports[i].q.pkts[ports[i].q.tail] = pkt;
+      ports[i].q.tail = (ports[i].q.tail + 1) % PKTQ_SIZE;
+      wakeup(&ports[i]);
+      release(&netlock);
+      kfree(buf);
+      return;
+    }
+  }
+  // no port bound
+  release(&netlock);
+  kfree(buf);
+  return;
   
 }
 
